@@ -9,14 +9,27 @@ import pandas as pd
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# رسائل موحدة
+MSG_UNAUTHORIZED = "❌ ليس لديك صلاحية استخدام البوت."
+MSG_ADMIN_ONLY = "❌ هذا الأمر حصري للمشرفين."
+MSG_COMMAND_FORMAT = "❌ استخدم: {usage}"
+MSG_ADDED_USER = "✅ تم إضافة المستخدم {uid}"
+MSG_REMOVED_USER = "✅ تم إزالة المستخدم {uid}"
+MSG_USER_EXISTS = "المستخدم موجود بالفعل"
+MSG_USER_NOT_FOUND = "❌ المستخدم غير موجود"
+MSG_NO_DATA = "لا توجد بيانات حالياً. انتظر قليلاً ثم أعد المحاولة."
+MSG_INVALID_IMAGE = "❌ لا توجد صورة صالحة."
+
 def is_authorized(user_id):
-    users = manage_users.list_users()
-    return user_id in users
+    return user_id in manage_users.list_users()
+
+def is_super_admin(user_id):
+    return manage_users.is_super_admin(user_id)
 
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     if not is_authorized(user_id):
-        update.message.reply_text("❌ ليس لديك صلاحية استخدام البوت.")
+        update.message.reply_text(MSG_UNAUTHORIZED)
         return
 
     keyboard = [
@@ -42,34 +55,55 @@ def start(update: Update, context: CallbackContext):
 
     update.message.reply_text("اختر الأداة:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+def help_cmd(update: Update, context: CallbackContext):
+    msg = (
+        "🤖 بوت التحليل الفني والفوندمنتال للمتابعة السريعة!\n\n"
+        "/start - القائمة الرئيسية\n"
+        "/add_user <user_id> - إضافة مستخدم (أدمن فقط)\n"
+        "/remove_user <user_id> - إزالة مستخدم (أدمن فقط)\n"
+        "/help - عرض هذه الرسالة\n\n"
+        "يمكنك إرسال صورة شارت وسيتم تحليلها تلقائياً."
+    )
+    update.message.reply_text(msg)
+
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = query.from_user.id
     if not is_authorized(user_id):
-        query.answer("❌ ليس لديك صلاحية.")
+        query.answer(MSG_UNAUTHORIZED, show_alert=True)
         return
     query.answer()
     data = query.data
 
     if data.startswith('analyze_'):
-        symbol = data.split('_')[1]
+        symbol = data.split('_', 1)[1]
         query.edit_message_text(f"جاري تحليل {symbol}... يرجى الانتظار.")
         ohlc_data = twelve_api.get_ohlc(symbol)
         if ohlc_data:
             df = pd.DataFrame(ohlc_data)
-            df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
-            tech_analysis = technical.full_technical_analysis(df)
-            fund_analysis = fundamental.get_fundamental_analysis(symbol)
-            elliott = elliott_waves.analyze_elliott(df)
-            message = f"✅ التحليل الكامل لـ {symbol}:\n\n{tech_analysis}\n{fund_analysis}\n{elliott}\n💡 الصفقة المقترحة: ...\n- نقطة الدخول: ...\n- وقف الخسارة: ...\n- الأهداف: ...\n- سبب الدخول: تحليل متعدد المؤشرات"
+            try:
+                df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
+                tech_analysis = technical.full_technical_analysis(df)
+                fund_analysis = fundamental.get_fundamental_analysis(symbol)
+                elliott = elliott_waves.analyze_elliott(df)
+                message = (
+                    f"✅ التحليل الكامل لـ {symbol}:\n\n"
+                    f"{tech_analysis}\n"
+                    f"{fund_analysis}\n"
+                    f"{elliott}\n"
+                    "💡 الصفقة المقترحة: ...\n- نقطة الدخول: ...\n- وقف الخسارة: ...\n- جني الأرباح: ..."
+                )
+            except Exception as ex:
+                logging.error(f"Error in analysis: {ex}")
+                message = "⚠️ حصل خطأ أثناء التحليل! تأكد من صحة البيانات أو حاول لاحقاً."
         else:
-            message = "لا توجد بيانات حالياً. انتظر لحظة ثم أعد المحاولة."
+            message = MSG_NO_DATA
         query.message.reply_text(message)
 
 def handle_photo(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     if not is_authorized(user_id):
-        update.message.reply_text("❌ ليس لديك صلاحية استخدام البوت.")
+        update.message.reply_text(MSG_UNAUTHORIZED)
         return
     photo_file = update.message.photo[-1].get_file()
     photo_path = f"temp_chart_{user_id}.jpg"
@@ -79,37 +113,38 @@ def handle_photo(update: Update, context: CallbackContext):
 
 def add_user_cmd(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    if user_id != manage_users.list_users()[0]:
-        update.message.reply_text("❌ لا يمكنك استخدام هذا الأمر.")
+    if not is_super_admin(user_id):
+        update.message.reply_text(MSG_ADMIN_ONLY)
         return
-    try:
-        new_user_id = int(context.args[0])
-        if manage_users.add_user(new_user_id):
-            update.message.reply_text(f"✅ تم إضافة المستخدم {new_user_id}")
-        else:
-            update.message.reply_text("المستخدم موجود بالفعل")
-    except:
-        update.message.reply_text("❌ استخدم: /add_user <user_id>")
+    if not context.args or not context.args[0].isdigit():
+        update.message.reply_text(MSG_COMMAND_FORMAT.format(usage="/add_user <user_id>"))
+        return
+    new_user_id = int(context.args[0])
+    if manage_users.add_user(new_user_id):
+        update.message.reply_text(MSG_ADDED_USER.format(uid=new_user_id))
+    else:
+        update.message.reply_text(MSG_USER_EXISTS)
 
 def remove_user_cmd(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    if user_id != manage_users.list_users()[0]:
-        update.message.reply_text("❌ لا يمكنك استخدام هذا الأمر.")
+    if not is_super_admin(user_id):
+        update.message.reply_text(MSG_ADMIN_ONLY)
         return
-    try:
-        rem_user_id = int(context.args[0])
-        if manage_users.remove_user(rem_user_id):
-            update.message.reply_text(f"✅ تم إزالة المستخدم {rem_user_id}")
-        else:
-            update.message.reply_text("❌ المستخدم غير موجود")
-    except:
-        update.message.reply_text("❌ استخدم: /remove_user <user_id>")
+    if not context.args or not context.args[0].isdigit():
+        update.message.reply_text(MSG_COMMAND_FORMAT.format(usage="/remove_user <user_id>"))
+        return
+    rem_user_id = int(context.args[0])
+    if manage_users.remove_user(rem_user_id):
+        update.message.reply_text(MSG_REMOVED_USER.format(uid=rem_user_id))
+    else:
+        update.message.reply_text(MSG_USER_NOT_FOUND)
 
 def main():
     updater = Updater(TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_cmd))
     dp.add_handler(CommandHandler("add_user", add_user_cmd))
     dp.add_handler(CommandHandler("remove_user", remove_user_cmd))
     dp.add_handler(CallbackQueryHandler(button_handler))
