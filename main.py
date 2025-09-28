@@ -3,8 +3,8 @@ import logging
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ContextTypes,
-    CallbackQueryHandler, filters
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters
 )
 from config import TELEGRAM_TOKEN
 from admin import manage_users
@@ -158,7 +158,7 @@ PORT = int(os.environ.get("PORT", 10000))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # يجب إضافته في إعدادات Render
 
 flask_app = Flask(__name__)
-application = None   # سيُضبط لاحقاً
+application = None
 
 @flask_app.route("/")
 def index():
