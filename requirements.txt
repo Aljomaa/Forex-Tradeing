@@ -1,0 +1,5 @@
+python-telegram-bot==13.17
+requests
+pandas
+opencv-python
+python-dotenv
