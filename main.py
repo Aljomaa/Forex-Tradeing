@@ -6,13 +6,26 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters
 )
-from config import TELEGRAM_TOKEN
+from dotenv import load_dotenv
+
+# --- تحميل متغيرات البيئة ---
+load_dotenv()
+
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN is not set! Check your .env or Render environment variables.")
+if not WEBHOOK_URL:
+    raise ValueError("WEBHOOK_URL is not set! Check your .env or Render environment variables.")
+
+# ---- استيراد الوحدات البرمجية الأخرى (تأكد أن الملفات موجودة) ----
+from config import TELEGRAM_TOKEN as _TT  # للتحقق فقط
 from admin import manage_users
 from analysis import twelve_api, technical, fundamental, elliott_waves
 from image_analysis import analyze_image
 import pandas as pd
 
-# رسائل ثابتة
+# --- رسائل ثابتة ---
 MSG_UNAUTHORIZED = "❌ ليس لديك صلاحية استخدام البوت."
 MSG_ADMIN_ONLY = "❌ هذا الأمر حصري للمشرفين."
 MSG_COMMAND_FORMAT = "❌ استخدم: {usage}"
@@ -35,7 +48,7 @@ def is_authorized(user_id):
 def is_super_admin(user_id):
     return manage_users.is_super_admin(user_id)
 
-# --- أوامر المستخدم ---
+# --- أوامر البوت ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id):
@@ -153,10 +166,6 @@ async def remove_user_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(MSG_USER_NOT_FOUND)
 
 # ---- Webhook & Flask ----
-
-PORT = int(os.environ.get("PORT", 10000))
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # يجب إضافته في إعدادات Render
-
 flask_app = Flask(__name__)
 application = None
 
@@ -166,12 +175,16 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
+    global application
+    if application is None:
+        return "Bot not ready", 503
     update = Update.de_json(request.get_json(force=True), application.bot)
     application.update_queue.put(update)
     return "ok"
 
 def main():
     global application
+
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -181,7 +194,7 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # إعداد Webhook
+    PORT = int(os.environ.get("PORT", 10000))
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
