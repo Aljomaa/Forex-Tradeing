@@ -13,16 +13,21 @@ load_dotenv()
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-if not TELEGRAM_TOKEN:
-    raise ValueError("TELEGRAM_TOKEN is not set! Check your .env or Render environment variables.")
-if not WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL is not set! Check your .env or Render environment variables.")
 
-# ---- استيراد الوحدات البرمجية الأخرى (تأكد أن الملفات موجودة) ----
-from config import TELEGRAM_TOKEN as _TT  # للتحقق فقط
-from admin import manage_users
-from analysis import twelve_api, technical, fundamental, elliott_waves
-from image_analysis import analyze_image
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN is not set! Check your .env or Render environment variables.")
+if not WEBHOOK_URL:
+    raise ValueError("❌ WEBHOOK_URL is not set! Check your .env or Render environment variables.")
+
+# ---- التحقق من وجود الملفات المهمة ----
+try:
+    from config import TELEGRAM_TOKEN as _TT  # للتحقق فقط
+    from admin import manage_users
+    from analysis import twelve_api, technical, fundamental, elliott_waves
+    from image_analysis import analyze_image
+except ImportError as e:
+    raise ImportError(f"❌ ملف مفقود أو غير صحيح: {e}. تأكد أن كل الوحدات موجودة.")
+
 import pandas as pd
 
 # --- رسائل ثابتة ---
