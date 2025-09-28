@@ -1,15 +1,18 @@
+import os
 import logging
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, ContextTypes,
+    CallbackQueryHandler, filters
+)
 from config import TELEGRAM_TOKEN
 from admin import manage_users
 from analysis import twelve_api, technical, fundamental, elliott_waves
 from image_analysis import analyze_image
 import pandas as pd
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# رسائل موحدة
+# رسائل ثابتة
 MSG_UNAUTHORIZED = "❌ ليس لديك صلاحية استخدام البوت."
 MSG_ADMIN_ONLY = "❌ هذا الأمر حصري للمشرفين."
 MSG_COMMAND_FORMAT = "❌ استخدم: {usage}"
@@ -20,16 +23,23 @@ MSG_USER_NOT_FOUND = "❌ المستخدم غير موجود"
 MSG_NO_DATA = "لا توجد بيانات حالياً. انتظر قليلاً ثم أعد المحاولة."
 MSG_INVALID_IMAGE = "❌ لا توجد صورة صالحة."
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# --- صلاحيات ---
 def is_authorized(user_id):
     return user_id in manage_users.list_users()
 
 def is_super_admin(user_id):
     return manage_users.is_super_admin(user_id)
 
-def start(update: Update, context: CallbackContext):
+# --- أوامر المستخدم ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id):
-        update.message.reply_text(MSG_UNAUTHORIZED)
+        await update.message.reply_text(MSG_UNAUTHORIZED)
         return
 
     keyboard = [
@@ -53,9 +63,12 @@ def start(update: Update, context: CallbackContext):
          InlineKeyboardButton("النفط", callback_data='analyze_USOIL')]
     ]
 
-    update.message.reply_text("اختر الأداة:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        "اختر الأداة:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-def help_cmd(update: Update, context: CallbackContext):
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🤖 بوت التحليل الفني والفوندمنتال للمتابعة السريعة!\n\n"
         "/start - القائمة الرئيسية\n"
@@ -64,20 +77,20 @@ def help_cmd(update: Update, context: CallbackContext):
         "/help - عرض هذه الرسالة\n\n"
         "يمكنك إرسال صورة شارت وسيتم تحليلها تلقائياً."
     )
-    update.message.reply_text(msg)
+    await update.message.reply_text(msg)
 
-def button_handler(update: Update, context: CallbackContext):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     if not is_authorized(user_id):
-        query.answer(MSG_UNAUTHORIZED, show_alert=True)
+        await query.answer(MSG_UNAUTHORIZED, show_alert=True)
         return
-    query.answer()
+    await query.answer()
     data = query.data
 
     if data.startswith('analyze_'):
         symbol = data.split('_', 1)[1]
-        query.edit_message_text(f"جاري تحليل {symbol}... يرجى الانتظار.")
+        await query.edit_message_text(f"جاري تحليل {symbol}... يرجى الانتظار.")
         ohlc_data = twelve_api.get_ohlc(symbol)
         if ohlc_data:
             df = pd.DataFrame(ohlc_data)
@@ -98,60 +111,84 @@ def button_handler(update: Update, context: CallbackContext):
                 message = "⚠️ حصل خطأ أثناء التحليل! تأكد من صحة البيانات أو حاول لاحقاً."
         else:
             message = MSG_NO_DATA
-        query.message.reply_text(message)
+        await query.message.reply_text(message)
 
-def handle_photo(update: Update, context: CallbackContext):
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id):
-        update.message.reply_text(MSG_UNAUTHORIZED)
+        await update.message.reply_text(MSG_UNAUTHORIZED)
         return
-    photo_file = update.message.photo[-1].get_file()
+    photo_file = await update.message.photo[-1].get_file()
     photo_path = f"temp_chart_{user_id}.jpg"
-    photo_file.download(photo_path)
+    await photo_file.download_to_drive(photo_path)
     analysis_result = analyze_image.analyze_chart(photo_path)
-    update.message.reply_text(analysis_result)
+    await update.message.reply_text(analysis_result)
 
-def add_user_cmd(update: Update, context: CallbackContext):
+async def add_user_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_super_admin(user_id):
-        update.message.reply_text(MSG_ADMIN_ONLY)
+        await update.message.reply_text(MSG_ADMIN_ONLY)
         return
     if not context.args or not context.args[0].isdigit():
-        update.message.reply_text(MSG_COMMAND_FORMAT.format(usage="/add_user <user_id>"))
+        await update.message.reply_text(MSG_COMMAND_FORMAT.format(usage="/add_user <user_id>"))
         return
     new_user_id = int(context.args[0])
     if manage_users.add_user(new_user_id):
-        update.message.reply_text(MSG_ADDED_USER.format(uid=new_user_id))
+        await update.message.reply_text(MSG_ADDED_USER.format(uid=new_user_id))
     else:
-        update.message.reply_text(MSG_USER_EXISTS)
+        await update.message.reply_text(MSG_USER_EXISTS)
 
-def remove_user_cmd(update: Update, context: CallbackContext):
+async def remove_user_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_super_admin(user_id):
-        update.message.reply_text(MSG_ADMIN_ONLY)
+        await update.message.reply_text(MSG_ADMIN_ONLY)
         return
     if not context.args or not context.args[0].isdigit():
-        update.message.reply_text(MSG_COMMAND_FORMAT.format(usage="/remove_user <user_id>"))
+        await update.message.reply_text(MSG_COMMAND_FORMAT.format(usage="/remove_user <user_id>"))
         return
     rem_user_id = int(context.args[0])
     if manage_users.remove_user(rem_user_id):
-        update.message.reply_text(MSG_REMOVED_USER.format(uid=rem_user_id))
+        await update.message.reply_text(MSG_REMOVED_USER.format(uid=rem_user_id))
     else:
-        update.message.reply_text(MSG_USER_NOT_FOUND)
+        await update.message.reply_text(MSG_USER_NOT_FOUND)
+
+# ---- Webhook & Flask ----
+
+PORT = int(os.environ.get("PORT", 10000))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # يجب إضافته في إعدادات Render
+
+flask_app = Flask(__name__)
+application = None   # سيُضبط لاحقاً
+
+@flask_app.route("/")
+def index():
+    return "Bot is alive!"
+
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.update_queue.put(update)
+    return "ok"
 
 def main():
-    updater = Updater(TELEGRAM_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    global application
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_cmd))
-    dp.add_handler(CommandHandler("add_user", add_user_cmd))
-    dp.add_handler(CommandHandler("remove_user", remove_user_cmd))
-    dp.add_handler(CallbackQueryHandler(button_handler))
-    dp.add_handler(MessageHandler(Filters.photo, handle_photo))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("add_user", add_user_cmd))
+    application.add_handler(CommandHandler("remove_user", remove_user_cmd))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    updater.start_polling()
-    updater.idle()
+    # إعداد Webhook
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="webhook",
+        webhook_url=f"{WEBHOOK_URL}/webhook",
+        web_app=flask_app
+    )
 
 if __name__ == "__main__":
     main()
