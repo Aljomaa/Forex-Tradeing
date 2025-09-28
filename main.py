@@ -172,7 +172,19 @@ async def remove_user_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- Webhook & Flask ----
 flask_app = Flask(__name__)
-application = None
+
+def create_application():
+    """إنشاء تطبيق Telegram مرة واحدة"""
+    return Application.builder().token(TELEGRAM_TOKEN).build()
+
+def setup_handlers(app):
+    """إعداد handlers للتطبيق"""
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("add_user", add_user_cmd))
+    app.add_handler(CommandHandler("remove_user", remove_user_cmd))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
 @flask_app.route("/")
 def index():
@@ -180,33 +192,48 @@ def index():
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    global application
-    if application is None:
-        return "Bot not ready", 503
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    application.update_queue.put(update)
-    return "ok"
+    try:
+        # إنشاء التطبيق إذا لم يكن موجوداً
+        if 'app' not in globals():
+            global app
+            app = create_application()
+            setup_handlers(app)
+            # بدء الاستماع للتحديثات
+            app.initialize()
+        
+        update = Update.de_json(request.get_json(force=True), app.bot)
+        app.update_queue.put(update)
+        return "ok"
+    except Exception as e:
+        logging.error(f"Webhook error: {e}")
+        return "error", 500
 
 def main():
-    global application
-
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(CommandHandler("add_user", add_user_cmd))
-    application.add_handler(CommandHandler("remove_user", remove_user_cmd))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    PORT = int(os.environ.get("PORT", 10000))
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="webhook",
-        webhook_url=f"{WEBHOOK_URL}/webhook",
-        web_app=flask_app
-    )
+    global app
+    
+    try:
+        # إنشاء وتجهيز التطبيق
+        app = create_application()
+        setup_handlers(app)
+        
+        # إعداد webhook
+        PORT = int(os.environ.get("PORT", 10000))
+        
+        # التأكد من أن التطبيق جاهز
+        app.initialize()
+        
+        # تشغيل webhook
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path="webhook",
+            webhook_url=f"{WEBHOOK_URL}/webhook",
+            web_app=flask_app
+        )
+        
+    except Exception as e:
+        logging.error(f"Failed to start bot: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
