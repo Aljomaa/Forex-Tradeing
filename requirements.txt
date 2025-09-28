@@ -1,5 +1,9 @@
-python-telegram-bot==13.17
-requests
+python-telegram-bot==20.7
 pandas
 opencv-python
 python-dotenv
+numpy
+twelve-data
+pytz
+pytesseract
+Pillow
