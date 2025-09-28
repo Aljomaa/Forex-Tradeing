@@ -1,4 +1,4 @@
-from config import load_users, save_users
+from config import load_users, save_users, is_admin
 
 def add_user(user_id):
     users = load_users()
@@ -18,3 +18,8 @@ def remove_user(user_id):
 
 def list_users():
     return load_users()
+
+def is_super_admin(user_id):
+    # صلاحية الادمن الأعلى (الذي أنشأ البوت أو من ENV)
+    from config import ADMINS
+    return int(user_id) in ADMINS
